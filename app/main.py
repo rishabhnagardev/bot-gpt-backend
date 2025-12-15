@@ -5,8 +5,12 @@ from app.db.session import SessionLocal
 from app.db.base import Base
 from app.db.session import engine
 
+from app.api import conversations
+
+
 # Create tables (models will be added later)
 Base.metadata.create_all(bind=engine)
+
 
 app = FastAPI(
     title="BOT GPT Backend",
@@ -14,6 +18,7 @@ app = FastAPI(
     version="0.1.0"
 )
 
+app.include_router(conversations.router)
 
 def get_db():
     db = SessionLocal()
