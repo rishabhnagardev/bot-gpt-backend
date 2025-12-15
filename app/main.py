@@ -1,4 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
+from sqlalchemy.orm import Session
+
+from app.db.session import SessionLocal
+from app.db.base import Base
+from app.db.session import engine
+
+# Create tables (models will be added later)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="BOT GPT Backend",
@@ -7,9 +15,17 @@ app = FastAPI(
 )
 
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @app.get("/health", tags=["Health"])
-def health_check():
+def health_check(db: Session = Depends(get_db)):
     return {
         "status": "ok",
-        "service": "bot-gpt-backend"
+        "database": "connected"
     }
