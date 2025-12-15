@@ -5,7 +5,7 @@ from app.db.session import SessionLocal
 from app.db.base import Base
 from app.db.session import engine
 
-from app.api import conversations
+from app.api import conversations, messages
 
 
 # Create tables (models will be added later)
@@ -19,6 +19,7 @@ app = FastAPI(
 )
 
 app.include_router(conversations.router)
+app.include_router(messages.router)
 
 def get_db():
     db = SessionLocal()
