@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,13 @@ app = FastAPI(
 
 app.include_router(conversations.router)
 app.include_router(messages.router)
+
+# Configure simple logging for the application
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+)
+
 
 def get_db():
     db = SessionLocal()

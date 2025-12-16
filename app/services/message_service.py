@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+import logging
 
 from app.models.message import Message
 from app.models.conversation import Conversation
@@ -7,6 +8,9 @@ from app.models.conversation_document import ConversationDocument
 from app.services.llm_service import call_llm
 from app.services.summarization_service import summarize_messages
 from app.services.rag_service import retrieve_relevant_chunks
+from app.db import cache
+
+logger = logging.getLogger(__name__)
 
 MAX_RAW_MESSAGES = 10
 
@@ -24,6 +28,7 @@ def add_user_message(
     db.add(msg)
     db.commit()
     db.refresh(msg)
+    cache.invalidate_conversation(conversation_id)
     return msg
 
 
@@ -40,10 +45,11 @@ def add_assistant_message(
     db.add(msg)
     db.commit()
     db.refresh(msg)
+    cache.invalidate_conversation(conversation_id)
     return msg
 
 
-def process_user_message(
+async def process_user_message(
     db: Session,
     conversation_id: int,
     user_content: str
@@ -68,9 +74,10 @@ def process_user_message(
     if len(messages) > MAX_RAW_MESSAGES:
         old_messages = messages[:-MAX_RAW_MESSAGES]
 
-        summary = summarize_messages(old_messages)
+        summary = await summarize_messages(old_messages)
         conversation.summary = summary
         db.commit()
+        cache.invalidate_conversation(conversation_id)
 
         recent_messages = messages[-MAX_RAW_MESSAGES:]
     else:
@@ -102,8 +109,8 @@ def process_user_message(
                 top_k=2
             )
 
-    # 5. LLM call (open or rag)
-    assistant_reply = call_llm(
+    # 5. Async LLM call (open or rag)
+    assistant_reply = await call_llm(
         conversation=conversation,
         recent_messages=recent_messages,
         user_message=user_content,
