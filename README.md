@@ -86,15 +86,11 @@ This README is a compact design + API reference for engineers. Diagrams are Merm
 
 ```mermaid
 flowchart LR
-  A[Client] --> B[API Gateway]
-  B --> C[FastAPI App]
+  A[Client] --> C[FastAPI App]
   C --> D[(Postgres)]
   C --> E[(Redis / In-Memory TTL Cache)]
-  C --> F[(Vector DB)]
+  C --> DOC[(Documents table in Postgres)]
   C --> G[(LLM API)]
-  C --> H[(Object Storage / S3)]
-  C --> I[(Background Queue)]
-  I --> G
 ```
 
 ---
@@ -111,7 +107,7 @@ sequenceDiagram
   participant Auth
   participant DB
   participant MsgSvc
-  participant VDB
+  participant DOC
   participant LLM
 
   User->>Client: submit message
@@ -122,8 +118,8 @@ sequenceDiagram
   API->>MsgSvc: store user message
   MsgSvc->>DB: insert message
   alt mode == rag
-    MsgSvc->>VDB: retrieve top_k chunks
-    VDB-->>MsgSvc: top_k context
+    MsgSvc->>DOC: retrieve linked documents / chunks (simple retriever)
+    DOC-->>MsgSvc: relevant text
   end
   MsgSvc->>LLM: call_llm(context)
   LLM-->>MsgSvc: reply
@@ -140,6 +136,42 @@ sequenceDiagram
 - POST /conversations
   - Body: { user_email, title?, mode: open|rag }
   - Response: { id, user_id, mode, created_at }
+
+Small diagrams for these endpoints (paste to mermaid.live):
+
+POST /conversations
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant DB
+
+  Client->>API: POST /conversations {user_email, mode}
+  API->>DB: create user (if needed) and conversation
+  DB-->>API: conversation id
+  API-->>Client: 201 {id, mode}
+```
+
+POST /conversations/{id}/messages
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant DB
+  participant MsgSvc
+  participant LLM
+
+  Client->>API: POST /conversations/{id}/messages (content, optional PDF)
+  API->>DB: fetch conversation
+  API->>MsgSvc: persist user message
+  MsgSvc->>DB: store message (and document row if PDF)
+  MsgSvc->>LLM: call_llm(context)
+  LLM-->>MsgSvc: assistant reply
+  MsgSvc->>DB: store assistant message
+  API-->>Client: 200 {content}
+```
 
 - GET /conversations?user_email=...
   - Response: list of conversation summaries
@@ -179,7 +211,7 @@ conversation_documents(id PK, conversation_id FK, document_id FK)
 
 How context is constructed:
 1. System prompt / instructions
-2. RAG context (top_k chunks from vector DB) — only when mode == `rag`
+2. RAG context (top_k chunks retrieved from `documents` linked to the conversation) — only when mode == `rag`
 3. Recent raw messages (sliding window)
 4. Summaries for older history
 5. Latest user message
@@ -198,14 +230,13 @@ Cost-reduction strategies:
 
 ---
 
-**RAG flow (brief)**
+**RAG flow (brief, current implementation)**
 
-1. Ingest PDF -> extract text -> chunk (e.g., 500 tokens) -> embed -> store vectors
-2. At query: retrieve top_k vectors from Vector DB
-3. Optionally re-rank by BM25 / heuristics
-4. Provide top_k chunks as context to LLM
+1. Ingest PDF -> extract text -> chunk (configurable size) -> store chunks as `documents` rows linked to the conversation
+2. At query: retrieve relevant chunks from `documents` using simple substring/ranking heuristics (our `rag_service`) — no vector DB in this implementation
+3. Provide top_k chunks as context to the LLM
 
-Implementation note: use a managed vector DB (Pinecone, Weaviate, Milvus) for scale.
+Implementation note: this repo uses a DB-backed document store and a simple retriever. If you need vector similarity at scale, consider adding a vector DB later.
 
 ---
 
@@ -213,14 +244,13 @@ Implementation note: use a managed vector DB (Pinecone, Weaviate, Milvus) for sc
 
 Primary bottlenecks at large scale (1M users):
 - LLM throughput and token cost
-- DB write/read throughput for messages
-- Vector DB latency and throughput
+- DB write/read throughput for messages and documents
+- Document retrieval latency (if many large documents per conversation)
 
 Scaling strategies:
 - App: horizontal stateless FastAPI instances behind a load balancer
 - DB: read replicas, partitioning (by user or time), sharding for writes
 - LLM: queue calls, worker autoscaling, use cheaper models as fallback
-- Vector DB: sharding or managed autoscaling; precompute embeddings during ingestion
 - Use caching (Redis) for hot conversations and recent messages
 
 Pattern: Prefer CQRS for separation of read/write workloads and background workers for heavy tasks (summaries, embeddings, PDF processing).
@@ -229,7 +259,7 @@ Pattern: Prefer CQRS for separation of read/write workloads and background worke
 
 **Operational & error handling**
 
-- Timeouts and circuit breakers for external LLM/vector DB
+- Timeouts and circuit breakers for external LLM providers
 - Retries with exponential backoff for transient failures
 - Idempotency support for message ingestion
 - Monitor token usage, latency, and error rates; add quotas & rate-limiting per user
