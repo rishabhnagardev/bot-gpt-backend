@@ -1,6 +1,3 @@
-cURL
-cURL
-cURL
 # BOT GPT – Conversational Backend (FastAPI)
 
 Short backend for a conversational AI system (Open Chat + RAG).
@@ -68,36 +65,175 @@ curl -X DELETE -H "X-User-Email: alice@example.com" \
 
   - Authentication: Requires `X-User-Email` header and ownership check.
   - Note: LLM calls are performed asynchronously; the endpoint awaits the response but the implementation uses a mocked async LLM client.
+# BOT GPT – Conversational Backend (FastAPI)
 
-  - Example cURL (open chat):
+Lightweight backend for a conversational AI system supporting Open Chat and RAG (PDF ingestion).
+
+This README is a compact design + API reference for engineers. Diagrams are Mermaid-friendly (paste into mermaid.live or mermaid.com).
+
+**Contents**
+- Architecture diagram (Mermaid)
+- Sequence diagram (Mermaid)
+- API summary
+- Data schema
+- LLM context & cost management
+- RAG flow
+- Scalability & error handling notes
+
+---
+
+**Architecture (compact)**
+
+```mermaid
+flowchart LR
+  A[Client] --> B[API Gateway]
+  B --> C[FastAPI App]
+  C --> D[(Postgres)]
+  C --> E[(Redis / In-Memory TTL Cache)]
+  C --> F[(Vector DB)]
+  C --> G[(LLM API)]
+  C --> H[(Object Storage / S3)]
+  C --> I[(Background Queue)]
+  I --> G
+```
+
+---
+
+**Sequence diagram (message send)**
+
+Paste to mermaid.live; script below:
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Client
+  participant API
+  participant Auth
+  participant DB
+  participant MsgSvc
+  participant VDB
+  participant LLM
+
+  User->>Client: submit message
+  Client->>API: POST /conversations/{id}/messages
+  API->>Auth: validate X-User-Email
+  Auth-->>API: user
+  API->>DB: fetch conversation
+  API->>MsgSvc: store user message
+  MsgSvc->>DB: insert message
+  alt mode == rag
+    MsgSvc->>VDB: retrieve top_k chunks
+    VDB-->>MsgSvc: top_k context
+  end
+  MsgSvc->>LLM: call_llm(context)
+  LLM-->>MsgSvc: reply
+  MsgSvc->>DB: store assistant message
+  MsgSvc-->>API: assistant content
+  API-->>Client: 200 {content}
 
 ```
-curl -X POST -H "X-User-Email: alice@example.com" \
-  -F "content=Explain microservices" \
-  http://localhost:8000/conversations/1/messages
-```
 
-  - Example cURL (RAG + PDF upload):
+---
 
-```
-curl -X POST -H "X-User-Email: alice@example.com" \
-  -F "content=Summarize this document" \
-  -F "file=@policy.pdf" \
-  http://localhost:8000/conversations/2/messages
-```
+**API summary (quick)**
 
-## Diagram placeholders (where to add visuals)
-- DIAGRAM: Add sequence diagram for **Open Chat Flow** here (mermaid). This should show: client -> API -> DB save user message -> services -> LLM -> save assistant -> return response.
-- DIAGRAM: Add sequence diagram for **RAG Flow (PDF)** here (mermaid). This should show: client -> API (upload PDF) -> PDF extractor -> DB store document & link -> retriever -> LLM -> save assistant -> return response.
-- DIAGRAM: Add component diagram for high-level architecture here (clients, API, services, DB, LLM, PDF service).
+- POST /conversations
+  - Body: { user_email, title?, mode: open|rag }
+  - Response: { id, user_id, mode, created_at }
 
-## How to render the mermaid diagrams
-Use https://mermaid.live — paste the mermaid script and export PNG/SVG.
+- GET /conversations?user_email=...
+  - Response: list of conversation summaries
 
-## Context & cost management (concise)
-- Keep a sliding window of most recent messages (controlled by `MAX_RAW_MESSAGES` in `message_service`).
-- When the window is exceeded, older messages are summarized (see `summarization_service`).
-- In RAG mode, documents linked to a conversation are chunked and retrieval injects top-k chunks only.
+- GET /conversations/{id}
+  - Response: conversation with messages (paginated)
+
+- DELETE /conversations/{id}
+  - Auth required (X-User-Email)
+
+- POST /conversations/{id}/messages
+  - Form: content (string), file (optional PDF, only allowed in `rag` mode)
+  - Headers: X-User-Email for ownership check
+  - Response: persisted assistant message
+
+Notes: endpoints enforce `conversation.user_id == current_user.id`. LLM calls are awaited by the message processing service which runs asynchronously.
+
+---
+
+**Data model (concise)**
+
+Tables:
+
+users(id PK, email UNIQUE, created_at)
+
+conversations(id PK, user_id FK, title, mode, created_at)
+
+messages(id PK, conversation_id FK, seq INT, role TEXT, content TEXT, created_at TIMESTAMP)
+
+documents(id PK, filename, content TEXT, created_at)
+
+conversation_documents(id PK, conversation_id FK, document_id FK)
+
+---
+
+**LLM Context & Cost Management**
+
+How context is constructed:
+1. System prompt / instructions
+2. RAG context (top_k chunks from vector DB) — only when mode == `rag`
+3. Recent raw messages (sliding window)
+4. Summaries for older history
+5. Latest user message
+
+When history exceeds model limits:
+- Apply windowing: keep last M raw messages
+- Replace older messages with a periodic summary message
+- Optionally compress older history (summarize then store)
+
+Cost-reduction strategies:
+- Use cheaper/smaller models for summarization and reranking
+- Summarize older history in background, not on every request
+- Cache LLM responses for repeated prompts
+- Limit `max_tokens` and tune stop sequences
+- Batch or queue heavy LLM tasks and use async workers
+
+---
+
+**RAG flow (brief)**
+
+1. Ingest PDF -> extract text -> chunk (e.g., 500 tokens) -> embed -> store vectors
+2. At query: retrieve top_k vectors from Vector DB
+3. Optionally re-rank by BM25 / heuristics
+4. Provide top_k chunks as context to LLM
+
+Implementation note: use a managed vector DB (Pinecone, Weaviate, Milvus) for scale.
+
+---
+
+**Scaling & bottlenecks**
+
+Primary bottlenecks at large scale (1M users):
+- LLM throughput and token cost
+- DB write/read throughput for messages
+- Vector DB latency and throughput
+
+Scaling strategies:
+- App: horizontal stateless FastAPI instances behind a load balancer
+- DB: read replicas, partitioning (by user or time), sharding for writes
+- LLM: queue calls, worker autoscaling, use cheaper models as fallback
+- Vector DB: sharding or managed autoscaling; precompute embeddings during ingestion
+- Use caching (Redis) for hot conversations and recent messages
+
+Pattern: Prefer CQRS for separation of read/write workloads and background workers for heavy tasks (summaries, embeddings, PDF processing).
+
+---
+
+**Operational & error handling**
+
+- Timeouts and circuit breakers for external LLM/vector DB
+- Retries with exponential backoff for transient failures
+- Idempotency support for message ingestion
+- Monitor token usage, latency, and error rates; add quotas & rate-limiting per user
+
 
 ## Additional implementation notes
 
@@ -122,6 +258,3 @@ Use https://mermaid.live — paste the mermaid script and export PNG/SVG.
 
 ## Notes & future improvements
 - Async LLM calls, streaming, vector DB, auth, background PDF processing.
-
----
-Add your diagrams where the DIAGRAM placeholders are noted above.
