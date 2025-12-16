@@ -194,7 +194,7 @@ Primary bottlenecks at large scale (1M users):
 - DB write/read throughput for messages and documents
 - Document retrieval latency (if many large documents per conversation)
 
-Scaling strategies:
+Scaling strategies (suggesting by learnings with experience and theoritical understanding of the systems):
 - App: horizontal stateless FastAPI instances behind a load balancer
 - DB: read replicas, partitioning (by user or time), sharding for writes
 - LLM: queue calls, worker autoscaling, use cheaper models as fallback
@@ -226,6 +226,16 @@ Pattern: Prefer CQRS for separation of read/write workloads and background worke
 4. Run: `uvicorn app.main:app --reload`
 5. Open API docs: `http://localhost:8000/docs`
 
+Environment
+
+- Create a `.env` file in the project root with one value:
+
+```
+GROQ_API_KEY=<groq-key-here>
+```
+
+- Get a key from: https://console.groq.com/keys
+
 ## Tests
 - Run: `PYTHONPATH=$PWD pytest -q`
 
@@ -247,7 +257,7 @@ A short demo video showcasing:
 👉 **Watch the demo here:**  
 [Demo Video – BOT GPT Backend](https://drive.google.com/file/d/1q6YQBfrQ8qXeWD_rpKwXGYdj3nkuLa9C/view?usp=drive_link)
 
-> _The demo is recorded using FastAPI UI docs to demonstrate backend APIs without any frontend.
+> The demo is recorded using FastAPI UI docs to demonstrate backend APIs without any frontend.
 
 
 ## API Endpoints (with curls)
