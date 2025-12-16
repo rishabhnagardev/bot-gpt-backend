@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 from app.models.message import Message
 from app.models.conversation import Conversation
 from app.services.llm_service import call_llm
+from app.services.summarization_service import summarize_messages
 
+MAX_RAW_MESSAGES = 10 # configurable: number of recent messages to keep in raw form before summarizing
 
 def add_user_message(db: Session, conversation_id: int, content: str) -> Message:
     msg = Message(
@@ -29,7 +31,7 @@ def add_assistant_message(db: Session, conversation_id: int, content: str) -> Me
     return msg
 
 
-def process_user_message(db: Session, conversation_id: int, user_content: str):
+def process_user_message(db, conversation_id, user_content):
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id
     ).first()
@@ -37,18 +39,24 @@ def process_user_message(db: Session, conversation_id: int, user_content: str):
     if not conversation:
         return None
 
-    # 1️⃣ Save user message
-    user_msg = add_user_message(db, conversation_id, user_content)
+    add_user_message(db, conversation_id, user_content)
 
-    # 2️⃣ Fetch history
-    history = conversation.messages
+    messages = conversation.messages
 
-    # 3️⃣ Call LLM
-    assistant_reply = call_llm(history, user_content)
+    if len(messages) > MAX_RAW_MESSAGES:
+        old_msgs = messages[:-MAX_RAW_MESSAGES]
+        summary = summarize_messages(old_msgs)
+        conversation.summary = summary
+        db.commit()
 
-    # 4️⃣ Save assistant reply
-    assistant_msg = add_assistant_message(
-        db, conversation_id, assistant_reply
+        recent_messages = messages[-MAX_RAW_MESSAGES:]
+    else:
+        recent_messages = messages
+
+    assistant_reply = call_llm(
+        recent_messages, user_content
     )
 
-    return assistant_msg
+    return add_assistant_message(
+        db, conversation_id, assistant_reply
+    )

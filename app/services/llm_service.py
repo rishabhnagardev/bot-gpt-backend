@@ -12,14 +12,16 @@ SYSTEM_PROMPT = (
 
 MAX_HISTORY_MESSAGES = 10  # sliding window
 
-
-def build_llm_messages(history, user_message: str):
-    """
-    Builds messages in OpenAI-compatible format
-    """
+def build_llm_messages(conversation, recent_messages, user_message):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    for msg in history[-MAX_HISTORY_MESSAGES:]:
+    if conversation.summary:
+        messages.append({
+            "role": "system",
+            "content": f"Conversation summary: {conversation.summary}"
+        })
+
+    for msg in recent_messages:
         messages.append({
             "role": msg.role,
             "content": msg.content
@@ -27,6 +29,7 @@ def build_llm_messages(history, user_message: str):
 
     messages.append({"role": "user", "content": user_message})
     return messages
+
 
 
 def call_llm(history, user_message: str) -> str:
