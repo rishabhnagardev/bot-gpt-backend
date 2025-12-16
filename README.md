@@ -1,75 +1,13 @@
 # BOT GPT – Conversational Backend (FastAPI)
-
-Short backend for a conversational AI system (Open Chat + RAG).
-
-## Quick Links
-- **Code:** [app/main.py](app/main.py)
-- **APIs:** [app/api/conversations.py](app/api/conversations.py), [app/api/messages.py](app/api/messages.py)
-- **Services:** [app/services/conversation_service.py](app/services/conversation_service.py), [app/services/message_service.py](app/services/message_service.py)
-
 ## Overview
+Lightweight backend for a conversational AI system supporting Open Chat and RAG (PDF ingestion).
+This README is a compact design + API reference for engineers. Diagrams are Mermaid-friendly (paste into mermaid.live or mermaid.com).
+
 This project provides a FastAPI backend that:
 - Persists conversations and messages
 - Supports Open Chat (LLM-only) and RAG (PDF-backed) modes
 - Summarizes old messages to control token usage
 - Retrieves relevant document chunks for RAG
-
-## Architecture (high level)
-Client -> FastAPI routers -> Services (conversation/message/rag) -> LLM / PDF service
-
-## Data model (brief)
-- `User` owns `Conversation`
-- `Conversation` has `Message` objects and optional `summary` and `mode` (`open` | `rag`)
-- `Document` linked via `ConversationDocument`
-
-## API Endpoints (summary)
-
-- **Create conversation**: `POST /conversations`
-  - Body: `{ "user_email": "...", "mode": "open"|"rag", "title": "optional" }`
-  - See: [app/api/conversations.py](app/api/conversations.py)
-
-- **List conversations**: `GET /conversations?user_email=...&limit=20&offset=0`
-
-  - Authentication: Requires header `X-User-Email` matching `user_email`.
-  - Example cURL:
-
-```
-curl -H "X-User-Email: alice@example.com" \
-  "http://localhost:8000/conversations?user_email=alice@example.com"
-```
-
-- **Get conversation**: `GET /conversations/{conversation_id}`
-
-  - Authentication: Requires header `X-User-Email` and the conversation must belong to that user.
-  - Example cURL:
-
-```
-curl -H "X-User-Email: alice@example.com" \
-  http://localhost:8000/conversations/1
-```
-
-- **Delete conversation**: `DELETE /conversations/{conversation_id}`
-
-  - Authentication: Requires header `X-User-Email` and ownership check.
-
-  - Example cURL:
-
-```
-curl -X DELETE -H "X-User-Email: alice@example.com" \
-  http://localhost:8000/conversations/1
-```
-
-- **Send message**: `POST /conversations/{conversation_id}/messages`
-  - Form fields: `content` (string), optional `file` (PDF — only allowed when conversation.mode == `rag`)
-  - See: [app/api/messages.py](app/api/messages.py)
-
-  - Authentication: Requires `X-User-Email` header and ownership check.
-  - Note: LLM calls are performed asynchronously; the endpoint awaits the response but the implementation uses a mocked async LLM client.
-# BOT GPT – Conversational Backend (FastAPI)
-
-Lightweight backend for a conversational AI system supporting Open Chat and RAG (PDF ingestion).
-
-This README is a compact design + API reference for engineers. Diagrams are Mermaid-friendly (paste into mermaid.live or mermaid.com).
 
 **Contents**
 - Architecture diagram (Mermaid)
@@ -82,13 +20,22 @@ This README is a compact design + API reference for engineers. Diagrams are Merm
 
 ---
 
+## Quick Links
+- **Code:** [app/main.py](app/main.py)
+- **APIs:** [app/api/conversations.py](app/api/conversations.py), [app/api/messages.py](app/api/messages.py)
+- **Services:** [app/services/conversation_service.py](app/services/conversation_service.py), [app/services/message_service.py](app/services/message_service.py)
+
+## Architecture (high level)
+Client -> FastAPI routers -> Services (conversation/message/rag) -> LLM / PDF service
+
+
 **Architecture (compact)**
 
 ```mermaid
 flowchart LR
   A[Client] --> C[FastAPI App]
   C --> D[(Postgres)]
-  C --> E[(Redis / In-Memory TTL Cache)]
+  C --> E[(In-memory dict TTL cache)]
   C --> DOC[(Documents table in Postgres)]
   C --> G[(LLM API)]
 ```
@@ -197,9 +144,9 @@ Tables:
 
 users(id PK, email UNIQUE, created_at)
 
-conversations(id PK, user_id FK, title, mode, created_at)
+conversations(id PK, user_id FK, title, mode, summary, messages, created_at)
 
-messages(id PK, conversation_id FK, seq INT, role TEXT, content TEXT, created_at TIMESTAMP)
+messages(id PK, conversation_id FK, role TEXT, content TEXT, created_at created_at TIMESTAMP)
 
 documents(id PK, filename, content TEXT, created_at)
 
@@ -251,7 +198,7 @@ Scaling strategies:
 - App: horizontal stateless FastAPI instances behind a load balancer
 - DB: read replicas, partitioning (by user or time), sharding for writes
 - LLM: queue calls, worker autoscaling, use cheaper models as fallback
-- Use caching (Redis) for hot conversations and recent messages
+- Use caching (in-memory dict cache) for hot conversations and recent messages
 
 Pattern: Prefer CQRS for separation of read/write workloads and background workers for heavy tasks (summaries, embeddings, PDF processing).
 
@@ -280,11 +227,98 @@ Pattern: Prefer CQRS for separation of read/write workloads and background worke
 5. Open API docs: `http://localhost:8000/docs`
 
 ## Tests
-- Run: `pytest`
+- Run: `PYTHONPATH=$PWD pytest -q`
 
 ## Docker
 - Build: `docker build -t bot-gpt .`
 - Run: `docker run -p 8000:8000 bot-gpt`
 
 ## Notes & future improvements
-- Async LLM calls, streaming, vector DB, auth, background PDF processing.
+- Async LLM calls, streaming, auth, background PDF processing.
+
+## Demo Video
+
+A short demo video showcasing:
+- Creating a conversation in **RAG** mode
+- Sending messages by choosing the conversation.
+- Uploading a **PDF document** and using it in context.
+- Touch few other APIs as well.
+
+👉 **Watch the demo here:**  
+[Demo Video – BOT GPT Backend](https://drive.google.com/file/d/1q6YQBfrQ8qXeWD_rpKwXGYdj3nkuLa9C/view?usp=drive_link)
+
+> _The demo is recorded using FastAPI UI docs to demonstrate backend APIs without any frontend.
+
+
+## API Endpoints (with curls)
+
+- **Create conversation**: `POST /conversations`
+  - Body: `{ "user_email": "...", "mode": "open"|"rag", "title": "optional" }`
+  - See: [app/api/conversations.py](app/api/conversations.py)
+
+  Example cURL:
+
+```
+curl -X 'POST' \
+  'http://localhost:8000/conversations' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "user_email": "abc@ok.com",
+  "mode": "rag",
+  "title": "this is my first rag chat"
+}'
+```
+
+- **List conversations**: `GET /conversations?user_email=...&limit=20&offset=0`
+
+  - Authentication: Requires header `X-User-Email` matching `user_email`.
+  - Example cURL:
+
+```
+curl -X 'GET' \
+  'http://localhost:8000/conversations?user_email=abc%40ok.com&limit=20&offset=0' \
+  -H 'accept: application/json'
+```
+
+- **Get conversation**: `GET /conversations/{conversation_id}`
+
+  - Authentication: Requires header `X-User-Email` and the conversation must belong to that user.
+  - Example cURL:
+
+```
+curl -X 'GET' \
+  'http://localhost:8000/conversations/8' \
+  -H 'accept: application/json'
+```
+
+- **Delete conversation**: `DELETE /conversations/{conversation_id}`
+
+  - Authentication: Requires header `X-User-Email` and ownership check.
+
+  - Example cURL:
+
+```
+curl -X 'DELETE' \
+  'http://localhost:8000/conversations/7' \
+  -H 'accept: application/json'
+```
+
+- **Send message**: `POST /conversations/{conversation_id}/messages`
+  - Form fields: `content` (string), optional `file` (PDF — only allowed when conversation.mode == `rag`)
+  - See: [app/api/messages.py](app/api/messages.py)
+
+  - Authentication: Requires `X-User-Email` header and ownership check.
+  - Note: LLM calls are performed asynchronously; the endpoint awaits the response but the implementation uses a mocked async LLM client.
+
+  Example cURL (RAG + PDF):
+
+```
+curl -X 'POST' \
+  'http://localhost:8000/conversations/8/messages' \
+  -H 'accept: application/json' \
+  -H 'x-user-email: abc@ok.com' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'content=summarise the data please' \
+  -F 'file=@bhuvanesh_tiwari_resume.pdf;type=application/pdf'
+```
