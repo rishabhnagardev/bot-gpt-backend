@@ -6,3 +6,6 @@ sqlalchemy
 groq
 dotenv
 pypdf
+pytest
+httpx
+python-multipart
