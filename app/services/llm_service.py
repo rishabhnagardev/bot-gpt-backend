@@ -33,8 +33,21 @@ def build_llm_messages(conversation, recent_messages, user_message):
 
 
 def call_llm(history, user_message: str) -> str:
-    messages = build_llm_messages(history, user_message)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    if context_chunks:
+        context_text = "\n".join(context_chunks)
+        messages.append({
+            "role": "system",
+            "content": f"Use the following context to answer:\n{context_text}"
+        })
+
+    for msg in history[-MAX_HISTORY_MESSAGES:]:
+        messages.append({"role": msg.role, "content": msg.content})
+
+    messages.append({"role": "user", "content": user_message})
     response = "dummy response for now to avoid llm calls"
+    
     # response = client.chat.completions.create(
     #     model="llama-3.3-70b-versatile",
     #     messages=messages,
