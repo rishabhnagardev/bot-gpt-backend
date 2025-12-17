@@ -34,9 +34,9 @@ Client -> FastAPI routers -> Services (conversation/message/rag) -> LLM / PDF se
 ```mermaid
 flowchart LR
   A[Client] --> C[FastAPI App]
-  C --> D[(Postgres)]
+  C --> D[(LOCAL DB)]
   C --> E[(In-memory dict TTL cache)]
-  C --> DOC[(Documents table in Postgres)]
+  C --> DOC[(Documents table in Local DB)]
   C --> G[(LLM API)]
 ```
 
